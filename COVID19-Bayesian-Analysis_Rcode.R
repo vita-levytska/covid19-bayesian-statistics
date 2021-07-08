@@ -1,0 +1,371 @@
+setwd("C:/General/UCF/FALL 2020/STA 4345 - Applied Bayesian Statistics/Project/Data/Data cleaned")
+
+# read in data
+
+covid <- read.csv("10-31-2020.csv")
+stay_home <- read.csv("StayAtHomeOrder.csv")
+unemployment <- read.csv("Unemployment_rate.csv")
+governors <- read.csv("us-governors.csv")
+
+
+
+# covid data cleaning
+#head(covid)
+# specify the variables we are interested in
+vars <- c("Province_State", "Confirmed", "Deaths", "People_Tested", "Mortality_Rate")
+covid <- covid[vars]
+
+# rename the States column
+names(covid)[1] <- "States"
+#head(covid)
+
+#delete rows with NA
+covid <- na.omit(covid)
+
+# remove the rows that are not representative of states
+# get the indeces of the rows we need to delete
+which(covid$States == "Guam")
+which(covid$States == "Virgin Islands")
+which(covid$States == "Northern Mariana Islands")
+which(covid$States == "Puerto Rico")
+#delete the chosen rows
+covid <-covid[-c(9, 12, 37, 42, 50),]
+covid
+
+
+
+# stay at home data cleaning
+stay_home <- na.omit(stay_home)
+stay_home<- stay_home[-9,]
+
+# unemployment data cleaning
+vars1 <- c("State", "Employed_2020_Oct", "Unemployed_2020_Oct")
+unemployment <- unemployment[vars1]
+names(unemployment)[1] <- "States"
+unemployment <- unemployment[-c(9,34),]
+
+# governors data cleaning
+vars2 <- c("state_name", "party")
+governors <- governors[vars2]
+#governors<- governors[-9,]
+names(governors)[1] <- "States"
+governors$republican <- ifelse(governors$party == "republican", 1, 0)
+governors$republican <- as.factor(governors$republican)
+
+covid
+stay_home
+unemployment
+governors
+data1 = merge(covid, stay_home, by = "States")
+data2 = merge(data1, unemployment,by = "States" )
+data3 = merge(data2, governors, by = "States" )
+data = data3
+
+
+
+library(rethinking)
+# make a linear model
+hist(data$Unemployed_2020_Oct)
+hist(log(data$Unemployed_2020_Oct))
+
+data$logConfirmed <- log(data$Confirmed)
+data$logDeaths <- log(data$Deaths)
+data$logPeople_Tested <- log(data$People_Tested)
+data$logEmployed_2020_Oct <- log(data$Employed_2020_Oct)
+data$logUnemployed_2020_Oct <- log(data$Unemployed_2020_Oct)
+data$republican <- as.numeric(data$republican)
+
+pairs(logConfirmed ~ logDeaths + logPeople_Tested + logEmployed_2020_Oct + republican + logUnemployed_2020_Oct + Days_Of_Stay_Home_Order, data =data, lower.panel=NULL)
+pairs(Confirmed ~ Deaths + People_Tested + Employed_2020_Oct + republican + Unemployed_2020_Oct + Days_Of_Stay_Home_Order, data =data, lower.panel=NULL)
+
+
+density <- read.csv("csvData.csv")
+
+## matching density to variable name state
+names(density)[1]<-"States"
+#nrow(density)
+
+d<-merge(data, density, by="States")
+
+d$Employed_Perc <- d$Employed_2020_Oct / d$Pop * 100
+d$Unemployed_Perc <- d$Unemployed_2020_Oct / d$Pop * 100
+d$stay_home <- d$Days_Of_Stay_Home_Order / 300 * 100
+d$percent_confirmed <- d$Confirmed / d$Pop * 100
+
+
+d$conf.level<-ifelse(
+  d$percent_confirmed<=(2),"1-Low",
+  ifelse(
+    d$percent_confirmed<=4,"2-Medium",
+    ifelse(
+      d$percent_confirmed<=(6),"3-High", TRUE
+    )))
+d[d$conf.level=="3-High",c(1,10,20)]
+## all 4 high confidence percent grouping have republican govenors 
+d[d$conf.level=="1-Low",c(1,10,20)]
+nrow( d[d$conf.level=="1-Low",])
+## 12 in the low confirmed percent grouping
+nrow( d[d$conf.level=="1-Low"& d$party=="republican",])
+## 3 of the 12 governors with states low confirmed percent are republican
+## 9 of the 12 governors with states in the low confirmed percent are democrat
+sum(d$republican)
+## of 50 states 26 have republican governors (.52%)
+## roughly even amounst states, 4 of one party affiliation in high category is interesting 
+#d$republican <- ifelse(d$party == "republican", 1, 0)
+
+mean(d$percent_confirmed)
+max(d$percent_confirmed)
+## set the alpha to 2.5, mean is 2.76, loose priors s=5
+## loose Beta priors 0,10
+## loose sigma priors 0,10
+
+d$log.mortality <- log(d$Mortality_Rate)
+bm1 <- map(
+  alist(
+    percent_confirmed ~ dnorm( mu , sigma ) ,
+    mu <- a + b1*Days_Of_Stay_Home_Order ,
+    a ~ dnorm( 2.5 , 5 ) ,
+    b1 ~ dnorm( 0 , 10 ) ,
+    sigma ~ dunif( 0 , 10 )
+  ) ,
+  data = d )
+
+precis(bm1)
+
+bm2 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bp*logPeople_Tested,
+    a ~ dnorm(2,5),
+    bp ~ dnorm(0,5),
+    sigma ~ dunif(0,5)
+  ),
+  data = d
+)
+precis(bm2)
+
+bm3 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bp*logPeople_Tested+bd*Days_Of_Stay_Home_Order,
+    a ~ dnorm(2,5),
+    bp ~ dnorm(0,10),
+    bd ~ dnorm(0,10),
+    sigma ~ dunif(0,10)
+  ),
+  data = d)
+
+precis(bm3)
+
+names(d)
+
+bm4 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bm*log.mortality,
+    a ~ dnorm(2,5),
+    bm ~ dnorm(0,10),
+    sigma ~ dunif(0,10)
+  ),
+  data = d)
+
+precis(bm4)
+
+bm5 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bm*log.mortality+bd*Days_Of_Stay_Home_Order,
+    a ~ dnorm(2,5),
+    bm ~ dnorm(0,10),
+    bd ~ dnorm(0,10),
+    sigma ~ dunif(0,10)
+  ),
+  data = d)
+precis(bm5)
+
+
+## adding days stay at home to mortality, one becomes insignificant
+bm6 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bm*log.mortality+bd*Days_Of_Stay_Home_Order+bp*logPeople_Tested,
+    a ~ dnorm(2,5),
+    bm ~ dnorm(0,10),
+    bd ~ dnorm(0,10),
+    bp ~ dnorm(0,10),
+    sigma ~ dunif(0,10)
+  ),
+  data = d)
+precis(bm6)
+
+plot(precis(bm1))
+bm7 <- map(
+  alist(
+    percent_confirmed ~ dnorm(mu, sigma),
+    mu <- a  + bm*log.mortality+bd*Days_Of_Stay_Home_Order+bp*logPeople_Tested
+    + bdp*Days_Of_Stay_Home_Order*logPeople_Tested+
+      +bmp*log.mortality*logPeople_Tested,
+    a ~ dnorm(2,10),
+    bm ~ dnorm(0,10),
+    bd ~ dnorm(0,10),
+    bp ~ dnorm(0,10),
+    bmp ~ dnorm(0,10),
+    bdp ~ dnorm(0,10),
+    sigma ~ dunif(0,20)
+  ),
+  data = d)
+precis(bm7)
+
+## interaction terms respond with significance 
+
+diffmods<- compare(bm1,bm2,bm3,bm4,bm5,bm6,bm7)
+diffmods
+
+## interaction model bm7 results in best model with WAIC of 128.3 with .47 weight
+
+## we see that the mean covid 19 percent has an decreasing relationship
+## with the number of days in lockdown, as the number of days in lockdown increase,
+## the covid 19 confirmed percent decrease as expected. 
+
+## the mean covid 19 confirmed percent also has a decreasing relationship for the interaction between 
+## the log of the mortality and people tested while the number of days in lockdown is held constant
+
+## the mean covid 19 confirmed percent also has a increasing relationship for the interaction between 
+## the number of days in lockdown and log people tested while 
+## log motality rate is held constant
+
+
+## full model
+m1.6 <- map2stan(
+  alist(
+    logConfirmed ~ dnorm(mu,sigma),
+    mu <- a + b1*logDeaths + b2*logPeople_Tested + b3*Days_Of_Stay_Home_Order + b4*logEmployed_2020_Oct + b5*logUnemployed_2020_Oct + b6*republican,
+    a ~ dnorm(2,5),
+    b1 ~ dnorm(0,10),
+    b2 ~ dnorm(0,10),
+    b3 ~ dnorm(0,10),
+    b4 ~ dnorm(0,10),
+    b5 ~ dnorm(0,10),
+    b6 ~ dnorm(0,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 5, iter = 4000, warmup = 1000)
+
+
+precis(m1.6)
+
+## reduced model 
+m1.18 <- map2stan(
+  alist(
+    logConfirmed ~ dnorm(mu,sigma),
+    mu <- a + b1*logDeaths + b3*Days_Of_Stay_Home_Order + b4*logEmployed_2020_Oct,
+    a ~ dnorm(2,10),
+    b1 ~ dnorm(0,10),
+    b3 ~ dnorm(0,10),
+    b4 ~ dnorm(0,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 5, iter = 5500, warmup = 1000)
+
+
+precis(m1.18)
+
+
+models <- compare(m1.6, m1.18)
+models
+
+m1.12 <- map2stan(
+  alist(
+    Employed_Perc ~ dnorm(mu,sigma),
+    mu <- a + b1*percent_confirmed + b3*stay_home + b6*republican,
+    a ~ dnorm(10,20),
+    b1 ~ dnorm(2,10),
+    b3 ~ dnorm(2,10),
+    b6 ~ dnorm(2,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 3, iter = 4000, warmup = 1000)
+
+precis(m1.12)
+
+m1.13 <- map2stan(
+  alist(
+    Unemployed_Perc ~ dnorm(mu,sigma),
+    mu <- a + b1*percent_confirmed + b3*stay_home + b6*republican,
+    a ~ dnorm(10,10),
+    b1 ~ dnorm(2,10),
+    b3 ~ dnorm(2,10),
+    b6 ~ dnorm(2,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 3, iter = 4000, warmup = 1000)
+
+precis(m1.13)
+
+
+#### Analysis of Employed vs Unemployed
+
+
+
+m1.14 <- map2stan(
+  alist(
+    stay_home ~ dnorm(mu,sigma),
+    a ~ dnorm(10,30),
+    mu <- a + b6*republican,
+    b6 ~ dnorm(2,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 5, iter = 4000, warmup = 1000)
+
+precis(m1.14)
+
+m1.15 <- map2stan(
+  alist(
+    stay_home ~ dnorm(mu,sigma),
+    a ~ dnorm(10,30),
+    mu <- a + b1*percent_confirmed,
+    b1 ~ dnorm(2,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=d, chains = 5, iter = 4000, warmup = 1000)
+
+precis(m1.15)
+
+covid <- read.csv("06-30-2020.csv")
+unemp_june <- read.csv("unemployment_june.csv", sep = '')
+dd <- read.csv("project_data.csv")
+
+# specify the variables we are interested in
+vars <- c("Province_State", "Confirmed", "Deaths", "People_Tested", "Mortality_Rate")
+covid <- covid[vars]
+
+#delete rows with NA
+covid <- na.omit(covid)
+
+# remove the rows that are not representative of states
+# get the indeces of the rows we need to delete
+which(covid$States == "Guam")
+which(covid$States == "Virgin Islands")
+which(covid$States == "Northern Mariana Islands")
+which(covid$States == "Puerto Rico")
+#delete the chosen rows
+covid <-covid[-c(9, 12, 37, 42, 50),]
+covid
+#rename States column
+names(covid)[1] <- "States"
+unemp_june$States <- covid$States
+
+datas <- merge(covid, unemp_june, by = "States")
+setdiff(covid$States, unemp_june$States)
+
+datas$stay_home <- dd$Days_Of_Stay_Home_Order / 150 * 100
+datas$percent_confirmed <- datas$Confirmed / dd$Pop * 100
+datas$party <- dd$party
+datas$republican <- ifelse(datas$party == "republican", 1, 0)
+
+m1.22 <- map2stan(
+  alist(
+    June_2020_perc ~ dnorm(mu,sigma),
+    mu <- a + b1*percent_confirmed + b3*stay_home + b6*republican,
+    a ~ dnorm(10,3),
+    b1 ~ dnorm(2,10),
+    b3 ~ dnorm(2,10),
+    b6 ~ dnorm(2,10),
+    sigma ~ dcauchy(0,100)
+  ) , data=datas, chains = 5, iter = 4000, warmup = 1000)
+
+precis(m1.22)
