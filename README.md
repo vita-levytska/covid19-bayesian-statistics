@@ -23,6 +23,14 @@ All datasets were combined, and the following new variables were created:
 
 Also, Confirmed, Deaths, Employed, Unemployed, Mortality Rate were log transformed to normalize them and have a better linear fit. 
 
+Data before transformation
+
+![Before](https://github.com/vita-levytska/covid19-bayesian-statistics/blob/main/Graphs/1.png)
+
+Data after transformation
+
+![After](https://github.com/vita-levytska/covid19-bayesian-statistics/blob/main/Graphs/2.png)
+
 In our analysis we attempt to answer the following questions:
 1. What predictors explain best the percent of confirmed cases?
 2. What predictors are correlated with Confirmed COVID-19 cases?
